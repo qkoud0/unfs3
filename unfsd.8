@@ -86,6 +86,12 @@ write its pid (process id) to the given file. Upon exit, the daemon
 will remove the file. Failure to create or remove the pid file is
 not considered fatal and only reported to syslog.
 .TP
+.BI "\-P " "\<file\>"
+Use the given file as port file. When the daemon starts up, it will
+write its port numbers to the given file. Failure to create the port file
+is considered fatal. This option is particularly useful when combined with
+.BR -u " or " -p " options.
+.TP
 .B \-u
 Use an unprivileged port for NFS and MOUNT service. Normally,
 .B unfsd
@@ -215,6 +221,19 @@ to the system log. For the filehandle cache, it will output the number
 of filehandles in the cache, the total number of cache accesses, and the
 number of hits and misses. For the file descriptor cache, it will output
 the number of currently held open READ and WRITE file descriptors.
+.SH "PORT FILE"
+The port file is used to store the port numbers used by the NFS and
+MOUNT services. The port map file is created by the unfsd daemon
+when it starts up if requested. 
+
+An example:
+.nf
+NFS_UDP=2049
+NFS_TCP=2049
+MOUNT_UDP=2049
+MOUNT_TCP=2049
+.fi
+
 .SH "EXPORTS FILE"
 The exports file,
 .I /etc/exports
