@@ -77,6 +77,7 @@ int opt_testconfig = FALSE;
 struct in6_addr opt_bind_addr;
 int opt_readable_executables = FALSE;
 char *opt_pid_file = NULL;
+FILE *opt_port_file = NULL;
 
 /* Register with portmapper? */
 int opt_portmapper = TRUE;
@@ -164,6 +165,79 @@ int get_socket_type(struct svc_req *rqstp)
 }
 
 /*
+ * return the server port of the transport
+ */
+unsigned short get_server_port(SVCXPRT *transp)
+{
+    struct sockaddr_in6 addr_buf;
+    struct sockaddr *addr = (struct sockaddr *) &addr_buf;
+    socklen_t len = sizeof(addr_buf);
+
+    if (getsockname(transp->xp_fd, addr, &len) < 0) {
+	logmsg(LOG_CRIT, "unable to determine server port");
+	daemon_exit(0);
+    }
+
+    if (addr->sa_family == AF_INET6) {
+	return ntohs(((const struct sockaddr_in6*)addr)->sin6_port);
+    } 
+    
+    if (addr->sa_family == AF_INET) {
+	return ntohs(((const struct sockaddr_in*)addr)->sin_port);
+    }
+
+    // should never happen since we create the socket
+    logmsg(LOG_CRIT, "unable to determine server port - unknown socket family");
+    daemon_exit(0);
+    exit(1); // to supress compiler warning
+}
+
+static void write_to_port_file(SVCXPRT *transp, rpcprog_t prognum, rpcvers_t versnum, int socktype)
+{
+    char *program;
+    char *protocol;
+    unsigned short port;
+
+    if (prognum == MOUNTPROG && versnum == MOUNTVERS1) {
+	// skip vers 1 as it is same as vers 3
+	return;
+    }
+    
+    port = get_server_port(transp);
+
+    switch (prognum) {
+	case NFS3_PROGRAM:
+	    program = "NFS";
+	    break;
+	case MOUNTPROG:
+	    program = "MOUNT";
+	    break;
+	default:
+	    logmsg(LOG_CRIT, "unknown prognum");
+	    daemon_exit(0);
+    }
+
+    switch (socktype) {
+	case SOCK_DGRAM:
+	    protocol = "UDP";
+	    break;
+	case SOCK_STREAM:
+	    protocol = "TCP";
+	    break;
+	default:
+	    logmsg(LOG_CRIT, "unknown socket type");
+	    daemon_exit(0);
+    }
+
+    if (opt_port_file == NULL) {
+	logmsg(LOG_CRIT, "port file not specified");
+	daemon_exit(0);
+    }
+
+    fprintf(opt_port_file, "%s_%s=%hu\n", program, protocol, port);
+}
+
+/*
  * write current pid to a file
  */
 static void create_pid_file(void)
@@ -221,7 +295,7 @@ static void parse_options(int argc, char **argv)
 {
 
     int opt = 0;
-    char *optstring = "bcC:de:hl:m:n:prstTuwi:";
+    char *optstring = "bcC:de:hl:m:n:prstTuwi:P:";
 
     while (opt != -1) {
 	opt = getopt(argc, argv, optstring);
@@ -252,6 +326,13 @@ static void parse_options(int argc, char **argv)
 #endif
 		opt_exports = optarg;
 		break;
+	    case 'P':
+		opt_port_file = fopen(optarg, "w");
+		if (opt_port_file == NULL) {
+		    perror("Cannot open port file");
+		    exit(1);
+		}
+		break;
 	    case 'h':
 		printf(UNFS_NAME);
 		printf("Usage: %s [options]\n", argv[0]);
@@ -260,6 +341,7 @@ static void parse_options(int argc, char **argv)
 		printf("\t-d          do not detach from terminal\n");
 		printf("\t-e <file>   file to use instead of /etc/exports\n");
 		printf("\t-i <file>   write daemon pid to given file\n");
+		printf("\t-P <file>   write NFS and MOUNT ports to given file\n");
 #ifdef WANT_CLUSTER
 		printf("\t-c          enable cluster extensions\n");
 		printf("\t-C <path>   set path for cluster extensions\n");
@@ -716,6 +798,10 @@ static void _register_service(SVCXPRT *transp,
 	daemon_exit(0);
     }
 
+    if (opt_port_file != NULL) {
+	write_to_port_file(transp, prognum, versnum, type);
+    }
+
     if (nconf != NULL)
 	freenetconfigent(nconf);
 
@@ -1114,6 +1200,12 @@ int main(int argc, char **argv)
     }
 
     register_mount_service(udptransp, tcptransp);
+
+    /* Close the port file we won't use anymore */
+    if (opt_port_file != NULL) {
+	fclose(opt_port_file);
+	opt_port_file = NULL;
+    }
 
 #ifndef WIN32
     if (opt_detach) {
