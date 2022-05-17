@@ -7,6 +7,7 @@
 
 #include "config.h"
 
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <rpc/rpc.h>
@@ -282,33 +283,36 @@ post_op_attr get_post_cached(struct svc_req * req)
  */
 static nfsstat3 set_time(const char *path, backend_statstruct buf, sattr3 new)
 {
-    time_t new_atime, new_mtime;
-    struct utimbuf utim;
+    struct timeval tv[2]; // 0 = atime, 1 = mtime
     int res;
 
     /* set atime and mtime */
     if (new.atime.set_it != DONT_CHANGE || new.mtime.set_it != DONT_CHANGE) {
 
 	/* compute atime to set */
-	if (new.atime.set_it == SET_TO_SERVER_TIME)
-	    new_atime = time(NULL);
-	else if (new.atime.set_it == SET_TO_CLIENT_TIME)
-	    new_atime = new.atime.set_atime_u.atime.seconds;
-	else			       /* DONT_CHANGE */
-	    new_atime = buf.st_atime;
+	if (new.atime.set_it == SET_TO_SERVER_TIME) {
+	    tv[0].tv_sec = time(NULL);
+	} else if (new.atime.set_it == SET_TO_CLIENT_TIME) {
+	    tv[0].tv_sec = new.atime.set_atime_u.atime.seconds;
+	    tv[0].tv_usec = new.atime.set_atime_u.atime.nseconds / 1000;
+	} else {		       /* DONT_CHANGE */
+	    tv[0].tv_sec = buf.st_atim.tv_sec;
+	    tv[0].tv_usec = buf.st_atim.tv_nsec / 1000;
+	}
 
 	/* compute mtime to set */
-	if (new.mtime.set_it == SET_TO_SERVER_TIME)
-	    new_mtime = time(NULL);
-	else if (new.mtime.set_it == SET_TO_CLIENT_TIME)
-	    new_mtime = new.mtime.set_mtime_u.mtime.seconds;
-	else			       /* DONT_CHANGE */
-	    new_mtime = buf.st_mtime;
+	if (new.mtime.set_it == SET_TO_SERVER_TIME) {
+	    tv[1].tv_sec = time(NULL);
+	} else if (new.mtime.set_it == SET_TO_CLIENT_TIME) {
+	    tv[1].tv_sec = new.mtime.set_mtime_u.mtime.seconds;
+	    tv[1].tv_usec = new.mtime.set_mtime_u.mtime.nseconds / 1000;
+	} else {		       /* DONT_CHANGE */
+	    tv[1].tv_sec = buf.st_mtim.tv_sec;
+	    tv[1].tv_usec = buf.st_mtim.tv_nsec / 1000;
+	}
 
-	utim.actime = new_atime;
-	utim.modtime = new_mtime;
-
-	res = backend_utime(path, &utim);
+	res = backend_lutimes(path, tv);
+	// res = backend_utime(path, &utim);
 	if (res == -1)
 	    return setattr_err();
     }

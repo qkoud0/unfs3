@@ -61,6 +61,7 @@
 #define backend_symlink symlink
 #define backend_truncate truncate
 #define backend_utime utime
+#define backend_lutimes lutimes
 #define backend_statstruct struct stat
 #define backend_dirstream DIR
 #define backend_statvfsstruct struct statvfs
